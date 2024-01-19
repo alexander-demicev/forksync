@@ -1,0 +1,176 @@
+name: Core
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        type: string
+        description: Release tag to use for the new version
+        required: true
+
+jobs:
+  buildandpublishimages:
+    name: Build and publish core CAPI and its providers images
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+      packages: write
+      id-token: write
+    outputs:
+      kubeadm-control-plane-controller-s390x: ${{ steps.digests.outputs.kubeadm-control-plane-controller-s390x }}
+      kubeadm-bootstrap-controller-s390x: ${{ steps.digests.outputs.kubeadm-bootstrap-controller-s390x }}
+      cluster-api-controller-s390x: ${{ steps.digests.outputs.cluster-api-controller-s390x }}
+      kubeadm-control-plane-controller-arm64: ${{ steps.digests.outputs.kubeadm-control-plane-controller-arm64 }}
+      kubeadm-bootstrap-controller-arm64: ${{ steps.digests.outputs.kubeadm-bootstrap-controller-arm64 }}
+      cluster-api-controller-arm64: ${{ steps.digests.outputs.cluster-api-controller-arm64 }}
+      kubeadm-control-plane-controller-amd64: ${{ steps.digests.outputs.kubeadm-control-plane-controller-amd64 }}
+      kubeadm-bootstrap-controller-amd64: ${{ steps.digests.outputs.kubeadm-bootstrap-controller-amd64 }}
+      cluster-api-controller-amd64: ${{ steps.digests.outputs.cluster-api-controller-amd64 }}
+      capd-manager-s390x: ${{ steps.digests.outputs.capd-manager-s390x }}
+      capd-manager-amd64: ${{ steps.digests.outputs.capd-manager-amd64 }}
+      capd-manager-arm64: ${{ steps.digests.outputs.capd-manager-arm64 }}
+    steps:
+      - name: Docker login to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.REGISTRY_TO_PUBLISH }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.release_tag }}
+          repository: alexander-demicev/cluster-api
+          path: cluster-api
+      - uses: sigstore/cosign-installer@v3.1.2
+      - name: Build, push and sign Cluster API images
+        env:
+          COSIGN_EXPERIMENTAL: 1
+          ALL_ARCH: amd64 arm64 s390x
+          ALL_DOCKER_BUILD: core kubeadm-bootstrap kubeadm-control-plane docker-infrastructure
+        run: |
+          cd cluster-api
+          REGISTRY="${{ vars.REGISTRY_TO_PUBLISH }}" TAG=${{inputs.release_tag}} make docker-build-all
+          REGISTRY="${{ vars.REGISTRY_TO_PUBLISH }}" TAG=${{inputs.release_tag}} make docker-push-all
+
+          data=$(docker images --digests --format "{{.Repository}} {{.Digest}}" | grep "ghcr.io")
+          while read -r line; do
+            # Split the line into image and digest using space as the delimiter
+            IFS=' ' read -r image digest <<< "$line"
+
+            # Execute the cosign sign command
+            echo "Signing ${image}@${digest}"
+            cosign sign --yes "${image}@${digest}" --oidc-provider="github-actions"
+            cosign verify "${image}@${digest}" --certificate-identity=https://github.com/alexander-demicev/forksync/.github/workflows/core.yaml@${{ github.ref }} --certificate-oidc-issuer=https://token.actions.githubusercontent.com
+          done <<< "$data"
+      - name: Set outputs
+        id: digests
+        run: |
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/kubeadm-control-plane-controller-s390x --digests --format "{{.Digest}}" )
+          echo "kubeadm-control-plane-controller-s390x=${digest}" >> $GITHUB_OUTPUT
+
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/kubeadm-bootstrap-controller-s390x --digests --format "{{.Digest}}" )
+          echo "kubeadm-bootstrap-controller-s390x=${digest}" >> $GITHUB_OUTPUT
+
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-controller-s390x --digests --format "{{.Digest}}" )
+          echo "cluster-api-controller-s390x=${digest}" >> $GITHUB_OUTPUT
+
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/kubeadm-control-plane-controller-arm64 --digests --format "{{.Digest}}" )
+          echo "kubeadm-control-plane-controller-arm64=${digest}" >> $GITHUB_OUTPUT
+
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/kubeadm-bootstrap-controller-arm64 --digests --format "{{.Digest}}" )
+          echo "kubeadm-bootstrap-controller-arm64=${digest}" >> $GITHUB_OUTPUT
+
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-controller-arm64 --digests --format "{{.Digest}}" )
+          echo "cluster-api-controller-arm64=${digest}" >> $GITHUB_OUTPUT
+
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/kubeadm-control-plane-controller-amd64 --digests --format "{{.Digest}}" )
+          echo "kubeadm-control-plane-controller-amd64=${digest}" >> $GITHUB_OUTPUT
+
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/kubeadm-bootstrap-controller-amd64 --digests --format "{{.Digest}}" )
+          echo "kubeadm-bootstrap-controller-amd64=${digest}" >> $GITHUB_OUTPUT
+
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-controller-amd64 --digests --format "{{.Digest}}" )
+          echo "cluster-api-controller-amd64=${digest}" >> $GITHUB_OUTPUT
+
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/capd-manager-s390x --digests --format "{{.Digest}}" )
+          echo "capd-manager-s390x=${digest}" >> $GITHUB_OUTPUT
+
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/capd-manager-amd64 --digests --format "{{.Digest}}" )
+          echo "capd-manager-amd64=${digest}" >> $GITHUB_OUTPUT
+
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/capd-manager-arm64 --digests --format "{{.Digest}}" )
+          echo "capd-manager-arm64=${digest}" >> $GITHUB_OUTPUT
+
+  provenance:
+    needs: [buildandpublishimages]
+    permissions:
+      actions: read
+      id-token: write
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/kubeadm-control-plane-controller-s390x
+            digest: ${{ needs.buildandpublishimages.outputs.kubeadm-control-plane-controller-s390x }}
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/kubeadm-bootstrap-controller-s390x
+            digest: ${{ needs.buildandpublishimages.outputs.kubeadm-bootstrap-controller-s390x }}
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-controller-s390x
+            digest: ${{ needs.buildandpublishimages.outputs.cluster-api-controller-s390x }}
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/kubeadm-control-plane-controller-arm64
+            digest: ${{ needs.buildandpublishimages.outputs.kubeadm-control-plane-controller-arm64 }}
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/kubeadm-bootstrap-controller-arm64
+            digest: ${{ needs.buildandpublishimages.outputs.kubeadm-bootstrap-controller-arm64 }}
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-controller-arm64
+            digest: ${{ needs.buildandpublishimages.outputs.cluster-api-controller-arm64 }}
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/kubeadm-control-plane-controller-amd64
+            digest: ${{ needs.buildandpublishimages.outputs.kubeadm-control-plane-controller-amd64 }}
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/kubeadm-bootstrap-controller-amd64
+            digest: ${{ needs.buildandpublishimages.outputs.kubeadm-bootstrap-controller-amd64 }}
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-controller-amd64
+            digest: ${{ needs.buildandpublishimages.outputs.cluster-api-controller-amd64 }}
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/capd-manager-s390x
+            digest: ${{ needs.buildandpublishimages.outputs.capd-manager-s390x }}
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/capd-manager-amd64
+            digest: ${{ needs.buildandpublishimages.outputs.capd-manager-amd64 }}
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/capd-manager-arm64
+            digest: ${{ needs.buildandpublishimages.outputs.capd-manager-arm64 }}
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v1.9.0
+    with:
+      image: ${{ matrix.image }}
+      digest: ${{ matrix.digest }}
+    secrets:
+      registry-username: ${{ github.actor }}
+      registry-password: ${{ secrets.GITHUB_TOKEN }}
+
+  release:
+    name: Create a github release
+    runs-on: ubuntu-latest
+    needs: [buildandpublishimages, provenance]
+    steps:
+      - name: Setup go
+        uses: actions/setup-go@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.release_tag }}
+          repository: alexander-demicev/cluster-api
+          path: cluster-api
+      - name: Create release artifacts
+        env: 
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          PROD_REGISTRY: ${{ vars.REGISTRY_TO_PUBLISH }} # Needed for Cluster API makefile
+          STAGING_REGISTRY: ${{ vars.REGISTRY_TO_PUBLISH }}
+        run: |
+          cd cluster-api
+          make release-manifests-all
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: cluster-api/out/*
+          tag_name: ${{ inputs.release_tag }}
+          token: ${{ secrets.PAT }}
+          repository: alexander-demicev/cluster-api

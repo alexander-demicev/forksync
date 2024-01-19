@@ -1,4 +1,4 @@
-name: Sync upstream CAPI repository with Rancher fork
+name: Sync forks
 
 on:
   schedule:

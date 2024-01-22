@@ -10,14 +10,14 @@ on:
         description: CAPI provider to sync
         options:
         - core
-        - aws
+        - operator
 
 jobs:
   sync-repo-on-schedule: # Run only on schedule, syncs all CAPI providers
     if: ${{ github.event_name == 'schedule' }}
     strategy:
       matrix:
-        providers: ["core", "aws"]
+        providers: ["core", "operator"]
     runs-on: ubuntu-latest
     permissions:
       contents: read

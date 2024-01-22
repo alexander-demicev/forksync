@@ -1,0 +1,124 @@
+name: Operator
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        type: string
+        description: Release tag to use for the new version
+        required: true
+
+jobs:
+  buildandpublishimages:
+    name: Build and publish CAPI operator and its providers images
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+      packages: write
+      id-token: write
+    outputs:
+      cluster-api-operator-s390x: ${{ steps.digests.outputs.cluster-api-operator-s390x }}
+      cluster-api-operator-amd64: ${{ steps.digests.outputs.cluster-api-operator-amd64 }}
+      cluster-api-operator-arm64: ${{ steps.digests.outputs.cluster-api-operator-arm64 }}
+    steps:
+      - name: Docker login to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.REGISTRY_TO_PUBLISH }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.release_tag }}
+          repository: alexander-demicev/cluster-api-operator
+          path: cluster-api-operator
+      - uses: sigstore/cosign-installer@v3.1.2
+      - name: Build, push and sign Cluster API operator images
+        env:
+          COSIGN_EXPERIMENTAL: 1
+          ALL_ARCH: amd64 arm64 s390x
+        run: |
+          cd cluster-api-operator
+          REGISTRY="${{ vars.REGISTRY_TO_PUBLISH }}" TAG=${{inputs.release_tag}} make docker-build-all
+          REGISTRY="${{ vars.REGISTRY_TO_PUBLISH }}" TAG=${{inputs.release_tag}} make docker-push-all
+
+          data=$(docker images --digests --format "{{.Repository}} {{.Digest}}" | grep "ghcr.io")
+          while read -r line; do
+            # Split the line into image and digest using space as the delimiter
+            IFS=' ' read -r image digest <<< "$line"
+
+            # Execute the cosign sign command
+            echo "Signing ${image}@${digest}"
+            cosign sign --yes "${image}@${digest}" --oidc-provider="github-actions"
+            cosign verify "${image}@${digest}" --certificate-identity=https://github.com/alexander-demicev/forksync/.github/workflows/operator.yaml@${{ github.ref }} --certificate-oidc-issuer=https://token.actions.githubusercontent.com
+          done <<< "$data"
+      - name: Set outputs
+        id: digests
+        run: |
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-operator-s390x --digests --format "{{.Digest}}" )
+          echo "cluster-api-operator-s390x=${digest}" >> $GITHUB_OUTPUT
+
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-operator-amd64 --digests --format "{{.Digest}}" )
+          echo "cluster-api-operator-amd64=${digest}" >> $GITHUB_OUTPUT
+
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-operator-arm64 --digests --format "{{.Digest}}" )
+          echo "cluster-api-operator-arm64=${digest}" >> $GITHUB_OUTPUT
+
+  provenance:
+    needs: [buildandpublishimages]
+    permissions:
+      actions: read
+      id-token: write
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-operator-s390x
+            digest: ${{ needs.buildandpublishimages.outputs.cluster-api-operator-s390x }}
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-operator-amd64
+            digest: ${{ needs.buildandpublishimages.outputs.cluster-api-operator-amd64 }}
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-operator-arm64
+            digest: ${{ needs.buildandpublishimages.outputs.cluster-api-operator-arm64 }}
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v1.9.0
+    with:
+      image: ${{ matrix.image }}
+      digest: ${{ matrix.digest }}
+    secrets:
+      registry-username: ${{ github.actor }}
+      registry-password: ${{ secrets.GITHUB_TOKEN }}
+
+  release:
+    name: Create a github release
+    runs-on: ubuntu-latest
+    needs: [buildandpublishimages, provenance]
+    steps:
+      - name: Setup go
+        uses: actions/setup-go@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.release_tag }}
+          repository: alexander-demicev/cluster-api-operator
+          path: cluster-api-operator
+      - name: Create release artifacts
+        env: 
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          PROD_REGISTRY: ${{ vars.REGISTRY_TO_PUBLISH }} # Needed for Cluster API Operator makefile
+          STAGING_REGISTRY: ${{ vars.REGISTRY_TO_PUBLISH }}
+          REGISTRY: ${{ vars.REGISTRY_TO_PUBLISH }}
+        run: |
+          cd cluster-api-operator
+          make manifest-modification
+          make chart-manifest-modification
+          make release-manifests
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: cluster-api-operator/out/*
+          tag_name: ${{ inputs.release_tag }}
+          token: ${{ secrets.PAT }}
+          repository: alexander-demicev/cluster-api-operator

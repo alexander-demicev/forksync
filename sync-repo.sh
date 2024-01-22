@@ -19,9 +19,9 @@ case "$provider_name" in
     source_repo="https://github.com/kubernetes-sigs/cluster-api.git"
     destination_repo="https://x-access-token:$2@github.com/alexander-demicev/cluster-api.git"
     ;;
-  "aws")
-    source_repo="https://github.com/kubernetes-sigs/cluster-api-provider-aws.git"
-    destination_repo="https://x-access-token:$2@github.com/alexander-demicev/cluster-api-provider-aws.git"
+  "operator")
+    source_repo="https://github.com/kubernetes-sigs/cluster-api-operator.git"
+    destination_repo="https://x-access-token:$2@github.com/alexander-demicev/cluster-api-operator.git"
     ;;
   # Add more cases for other providers as needed
   *)

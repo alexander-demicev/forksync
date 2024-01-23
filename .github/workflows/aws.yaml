@@ -1,4 +1,4 @@
-name: Operator
+name: AWS
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ on:
 
 jobs:
   buildandpublishimages:
-    name: Build and publish CAPI operator images
+    name: Build and publish CAPI AWS provider images
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -18,9 +18,9 @@ jobs:
       packages: write
       id-token: write
     outputs:
-      cluster-api-operator-s390x: ${{ steps.digests.outputs.cluster-api-operator-s390x }}
-      cluster-api-operator-amd64: ${{ steps.digests.outputs.cluster-api-operator-amd64 }}
-      cluster-api-operator-arm64: ${{ steps.digests.outputs.cluster-api-operator-arm64 }}
+      cluster-api-aws-controller-s390x: ${{ steps.digests.outputs.cluster-api-aws-controller-s390x }}
+      cluster-api-aws-controller-amd64: ${{ steps.digests.outputs.cluster-api-aws-controller-amd64 }}
+      cluster-api-aws-controller-arm64: ${{ steps.digests.outputs.cluster-api-aws-controller-arm64 }}
     steps:
       - name: Docker login to registry
         uses: docker/login-action@v3
@@ -33,15 +33,15 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ inputs.release_tag }}
-          repository: alexander-demicev/cluster-api-operator
-          path: cluster-api-operator
+          repository: alexander-demicev/cluster-api-provider-aws
+          path: cluster-api-provider-aws
       - uses: sigstore/cosign-installer@v3.1.2
-      - name: Build, push and sign Cluster API operator images
+      - name: Build, push and sign Cluster API AWS provider images
         env:
           COSIGN_EXPERIMENTAL: 1
           ALL_ARCH: amd64 arm64 s390x
         run: |
-          cd cluster-api-operator
+          cd cluster-api-provider-aws
           REGISTRY="${{ vars.REGISTRY_TO_PUBLISH }}" TAG=${{inputs.release_tag}} make docker-build-all
           REGISTRY="${{ vars.REGISTRY_TO_PUBLISH }}" TAG=${{inputs.release_tag}} make docker-push-all
 
@@ -53,19 +53,19 @@ jobs:
             # Execute the cosign sign command
             echo "Signing ${image}@${digest}"
             cosign sign --yes "${image}@${digest}" --oidc-provider="github-actions"
-            cosign verify "${image}@${digest}" --certificate-identity=https://github.com/alexander-demicev/forksync/.github/workflows/operator.yaml@${{ github.ref }} --certificate-oidc-issuer=https://token.actions.githubusercontent.com
+            cosign verify "${image}@${digest}" --certificate-identity=https://github.com/alexander-demicev/forksync/.github/workflows/aws.yaml@${{ github.ref }} --certificate-oidc-issuer=https://token.actions.githubusercontent.com
           done <<< "$data"
       - name: Set outputs
         id: digests
         run: |
-          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-operator-s390x --digests --format "{{.Digest}}" )
-          echo "cluster-api-operator-s390x=${digest}" >> $GITHUB_OUTPUT
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-aws-controller-s390x --digests --format "{{.Digest}}" )
+          echo "cluster-api-aws-controller-s390x=${digest}" >> $GITHUB_OUTPUT
 
-          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-operator-amd64 --digests --format "{{.Digest}}" )
-          echo "cluster-api-operator-amd64=${digest}" >> $GITHUB_OUTPUT
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-aws-controller-amd64 --digests --format "{{.Digest}}" )
+          echo "cluster-api-aws-controller-amd64=${digest}" >> $GITHUB_OUTPUT
 
-          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-operator-arm64 --digests --format "{{.Digest}}" )
-          echo "cluster-api-operator-arm64=${digest}" >> $GITHUB_OUTPUT
+          digest=$( docker images ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-aws-controller-arm64 --digests --format "{{.Digest}}" )
+          echo "cluster-api-aws-controller-arm64=${digest}" >> $GITHUB_OUTPUT
 
   provenance:
     needs: [buildandpublishimages]
@@ -76,12 +76,12 @@ jobs:
     strategy:
       matrix:
         include:
-          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-operator-s390x
-            digest: ${{ needs.buildandpublishimages.outputs.cluster-api-operator-s390x }}
-          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-operator-amd64
-            digest: ${{ needs.buildandpublishimages.outputs.cluster-api-operator-amd64 }}
-          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-operator-arm64
-            digest: ${{ needs.buildandpublishimages.outputs.cluster-api-operator-arm64 }}
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-aws-controller-s390x
+            digest: ${{ needs.buildandpublishimages.outputs.cluster-api-aws-controller-s390x }}
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-aws-controller-amd64
+            digest: ${{ needs.buildandpublishimages.outputs.cluster-api-aws-controller-amd64 }}
+          - image: ${{ vars.REGISTRY_TO_PUBLISH }}/cluster-api-aws-controller-arm64
+            digest: ${{ needs.buildandpublishimages.outputs.cluster-api-aws-controller-arm64 }}
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v1.9.0
     with:
       image: ${{ matrix.image }}
@@ -102,23 +102,21 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ inputs.release_tag }}
-          repository: alexander-demicev/cluster-api-operator
-          path: cluster-api-operator
+          repository: alexander-demicev/cluster-api-provider-aws
+          path: cluster-api-provider-aws
       - name: Create release artifacts
         env: 
           RELEASE_TAG: ${{ inputs.release_tag }}
-          PROD_REGISTRY: ${{ vars.REGISTRY_TO_PUBLISH }} # Needed for Cluster API Operator makefile
+          PROD_REGISTRY: ${{ vars.REGISTRY_TO_PUBLISH }} # Needed for Cluster API AWS makefile
           STAGING_REGISTRY: ${{ vars.REGISTRY_TO_PUBLISH }}
           REGISTRY: ${{ vars.REGISTRY_TO_PUBLISH }}
         run: |
-          cd cluster-api-operator
-          make manifest-modification
-          make chart-manifest-modification
+          cd cluster-api-provider-aws
           make release-manifests
       - name: Create release
         uses: softprops/action-gh-release@v1
         with:
-          files: cluster-api-operator/out/*
+          files: cluster-api-provider-aws/out/*
           tag_name: ${{ inputs.release_tag }}
           token: ${{ secrets.PAT }}
-          repository: alexander-demicev/cluster-api-operator
+          repository: alexander-demicev/cluster-api-provider-aws

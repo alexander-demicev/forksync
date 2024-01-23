@@ -23,9 +23,13 @@ case "$provider_name" in
     source_repo="https://github.com/kubernetes-sigs/cluster-api-operator.git"
     destination_repo="https://x-access-token:$2@github.com/alexander-demicev/cluster-api-operator.git"
     ;;
+  "aws")
+    source_repo="https://github.com/kubernetes-sigs/cluster-api-provider-aws.git"
+    destination_repo="https://x-access-token:$2@github.com/alexander-demicev/cluster-api-provider-aws.git"
+    ;;
   # Add more cases for other providers as needed
   *)
-    echo "Invalid provider name. Supported providers: core, aws"
+    echo "Invalid provider name."
     exit 1
     ;;
 esac

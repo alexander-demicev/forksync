@@ -12,13 +12,20 @@ on:
         - core
         - operator
         - aws
+        - azure
+        - azure-so
 
 jobs:
   sync-repo-on-schedule: # Run only on schedule, syncs all CAPI providers
     if: ${{ github.event_name == 'schedule' }}
     strategy:
       matrix:
-        providers: ["core", "operator", "aws"]
+        providers:
+        - core
+        - operator
+        - aws
+        - azure
+        - azure-so
     runs-on: ubuntu-latest
     permissions:
       contents: read

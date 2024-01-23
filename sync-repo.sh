@@ -27,6 +27,14 @@ case "$provider_name" in
     source_repo="https://github.com/kubernetes-sigs/cluster-api-provider-aws.git"
     destination_repo="https://x-access-token:$2@github.com/alexander-demicev/cluster-api-provider-aws.git"
     ;;
+  "azure")
+    source_repo="https://github.com/kubernetes-sigs/cluster-api-provider-azure.git"
+    destination_repo="https://x-access-token:$2@github.com/alexander-demicev/cluster-api-provider-azure.git"
+    ;;
+  "azure-so")
+    source_repo="https://github.com/Azure/azure-service-operator.git"
+    destination_repo="https://x-access-token:$2@github.com/alexander-demicev/azure-service-operator.git"
+    ;;
   # Add more cases for other providers as needed
   *)
     echo "Invalid provider name."
